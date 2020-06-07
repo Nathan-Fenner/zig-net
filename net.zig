@@ -319,7 +319,7 @@ pub fn main() !void {
     var params = zeroed(Net.Param);
     Net.initializeParams(&params, &rng.random);
 
-    var iter = RangeTo(10000).new();
+    var iter = RangeTo(1000).new();
     while (iter.next()) |i| {
         var output: f32 = 0;
         Net.run(&training, params, &output);
@@ -329,6 +329,6 @@ pub fn main() !void {
         var backpropDiscard = zeroed(Net.Input);
         Net.reverse(&training, params, 1, &backpropDiscard, &gradient);
 
-        Net.updateGradient(&params, -0.001, &gradient);
+        Net.updateGradient(&params, -0.01, &gradient);
     }
 }
