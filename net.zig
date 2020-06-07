@@ -181,29 +181,136 @@ fn Relu(comptime in: usize, comptime out: usize) type {
     return Fan(out, Seq(.{ Lin(in), Relu1 }));
 }
 
+fn LossSum(comptime LossNet: type) type {
+    assert(LossNet.Output == f32);
+    return struct {
+        const Input = []LossNet.Input;
+        const Output = f32;
+        const Param = LossNet.Param;
+
+        fn initializeParams(param: *Param, rng: *std.rand.Random) void {
+            LossNet.initializeParams(param, rng);
+        }
+
+        fn run(input: *Input, param: *Param, output: *Output) void {
+            var loss: f32 = 0.0;
+
+            for (input.*) |item, index| {
+                var lossAdd: f32 = 0.0;
+                LossNet.run(&input.*[index], param, &lossAdd);
+                loss += lossAdd;
+            }
+
+            output.* += loss;
+        }
+        fn reverse(
+            input: *Input,
+            param: *Param,
+            delta: *Output,
+            backprop: *Input, // add
+            gradient: *Param, // add
+        ) void {
+            // TODO: backprop is not set; should we have non-differentiable inputs?
+            for (input.*) |_, index| {
+                var discardInputDelta = zeroed(LossNet.Input);
+                // here we rely on gradients being added, instead of set:
+                LossNet.reverse(&input.*[index], param, delta, &discardInputDelta, gradient);
+            }
+        }
+    };
+}
+
+fn TrainingExample(comptime T: type, comptime G: type) type {
+    return struct {
+        input: T,
+        target: G,
+    };
+}
+
+fn LossL2(comptime Net: type) type {
+    return struct {
+        const Input = TrainingExample(Net.Input, f32);
+        const Output = f32;
+        const Param = Net.Param;
+
+        fn initializeParams(param: *Param, rng: *std.rand.Random) void {
+            Net.initializeParams(param, rng);
+        }
+
+        fn run(input: *Input, param: *Param, output: *Output) void {
+            var predicted = [1]f32{0};
+            Net.run(&input.input, param, &predicted);
+            var loss = (predicted[0] - input.target) * (predicted[0] - input.target);
+            output.* += loss;
+        }
+        fn reverse(
+            input: *Input,
+            param: *Param,
+            delta: *Output,
+            backprop: *Input, // add
+            gradient: *Param, // add
+        ) void {
+            // 'delta' indicates how much being wrong counts.
+            // the amount we pass back into the previous layer is therefore based
+            // on how far off the current estimate is.
+
+            // So we first need to run forward to obtain a prediction:
+            var predicted = [1]f32{0};
+            Net.run(&input.input, param, &predicted);
+
+            // We have: L = (pred - target)^2
+            // and we know dE / dL
+            // we want to find dpred / dL
+
+            // dE/dA = dE/dL dL/dA
+            // so take d/dpred of both sides:
+            // dL/dpred = 2(pred-target)
+
+            // so dE/dpred = dE/dL 2 (pred - target).
+
+            var adjustedDelta = 2 * delta.* * (predicted[0] - input.target);
+            var discardInputBackprop = zeroed(Net.Input);
+            Net.reverse(
+                &input.input,
+                param,
+                &adjustedDelta,
+                &discardInputBackprop,
+                gradient,
+            );
+        }
+    };
+}
+
 pub fn main() !void {
     const stdout = std.io.getStdOut().outStream();
 
-    const Net = Relu(3, 2);
-    var params: Net.Param = zeroed(Net.Param);
+    const NetPredict = Fan(1, Lin(1)); // Fan of 1 converts to [1]f32
+    const Net = LossSum(LossL2(NetPredict));
 
     var rng = std.rand.Pcg.init(0);
+
+    var params = zeroed(Net.Param);
     Net.initializeParams(&params, &rng.random);
 
-    var input: Net.Input = .{
-        100,
-        110,
-        120,
+    std.debug.warn("param :: {}\n", .{params[0]});
+
+    var training = [_]TrainingExample([1]f32, f32){
+        .{ .input = [1]f32{0}, .target = 0 },
+        .{ .input = [1]f32{1}, .target = 2 },
+        .{ .input = [1]f32{2}, .target = 4 },
+        .{ .input = [1]f32{-1}, .target = -2 },
+        .{ .input = [1]f32{-2}, .target = -4 },
     };
 
-    var output = [2]f32{ 0, 0 };
-    Net.run(&input, &params, &output);
-    try stdout.print("out :: {d:3.2}\n", .{output});
+    var output: f32 = 0;
+    var runtime_zero: usize = 0;
+    var training_slice: []TrainingExample([1]f32, f32) = training[runtime_zero..training.len];
+    Net.run(&training_slice, &params, &output);
+    try stdout.print("loss :: {d:3.2}\n", .{output});
 
-    var delta: Net.Output = [2]f32{ 1, 1 };
-    var backprop: Net.Input = .{ 0, 0, 0 };
-    var gradient: Net.Param = zeroed(Net.Param);
+    var gradient = zeroed(Net.Param);
+    var backpropDiscard = zeroed(Net.Input);
+    Net.reverse(&training_slice, &params, &output, &backpropDiscard, &gradient);
 
-    Net.reverse(&input, &params, &delta, &backprop, &gradient);
-    try stdout.print("out :: {d:3.2} {d:3.2}\n", .{ output[0], output[1] });
+    try stdout.print("gradient :: weight : {d:3.2} ; bias : {d:3.2}\n", .{ gradient[0].weights[0], gradient[0].bias });
 }
