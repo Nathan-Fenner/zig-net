@@ -26,6 +26,9 @@ const Relu1 = struct {
     fn initializeParams(param: *Param, rng: *std.rand.Random) void {
         // nothing
     }
+    fn updateGradient(gradient: *Param, scale: f32, update: *Param) void {
+        // nothing
+    }
 
     fn run(input: *Input, param: *Param, output: *Output) void {
         if (input.* > 0) {
@@ -58,6 +61,13 @@ fn Lin(size: usize) type {
             }
             param.bias = rng.float(f32) * 4 - 2;
         }
+        fn updateGradient(gradient: *Param, scale: f32, update: *Param) void {
+            var iter = RangeTo(size).new();
+            while (iter.next()) |i| {
+                gradient.weights[i] += scale * update.weights[i];
+            }
+            gradient.bias += scale * update.bias;
+        }
 
         fn run(input: *Input, param: *Param, output: *Output) void {
             for (input.*) |x, i| {
@@ -87,13 +97,6 @@ fn zeroed(comptime T: type) T {
     return x;
 }
 
-fn isTrivial(comptime t: type) bool {
-    if (t == struct {}) {
-        return true;
-    }
-    return false;
-}
-
 fn Seq2(comptime Net1: type, comptime Net2: type) type {
     assert(Net1.Output == Net2.Input);
 
@@ -108,6 +111,10 @@ fn Seq2(comptime Net1: type, comptime Net2: type) type {
         fn initializeParams(param: *Param, rng: *std.rand.Random) void {
             Net1.initializeParams(&param.first, rng);
             Net2.initializeParams(&param.second, rng);
+        }
+        fn updateGradient(gradient: *Param, scale: f32, update: *Param) void {
+            Net1.updateGradient(&gradient.first, scale, &update.first);
+            Net2.updateGradient(&gradient.second, scale, &update.second);
         }
 
         fn run(input: *Input, param: *Param, output: *Output) void {
@@ -155,6 +162,12 @@ fn Fan(comptime by: usize, Net: type) type {
                 Net.initializeParams(&param[i], rng);
             }
         }
+        fn updateGradient(gradient: *Param, scale: f32, update: *Param) void {
+            var iter = RangeTo(by).new();
+            while (iter.next()) |i| {
+                Net.updateGradient(&gradient.*[i], scale, &update.*[i]);
+            }
+        }
 
         fn run(input: *Input, param: *Param, output: *Output) void {
             var iter = RangeTo(by).new();
@@ -190,6 +203,9 @@ fn LossSum(comptime LossNet: type) type {
 
         fn initializeParams(param: *Param, rng: *std.rand.Random) void {
             LossNet.initializeParams(param, rng);
+        }
+        fn updateGradient(gradient: *Param, scale: f32, update: *Param) void {
+            LossNet.updateGradient(gradient, scale, update);
         }
 
         fn run(input: *Input, param: *Param, output: *Output) void {
@@ -235,6 +251,9 @@ fn LossL2(comptime Net: type) type {
 
         fn initializeParams(param: *Param, rng: *std.rand.Random) void {
             Net.initializeParams(param, rng);
+        }
+        fn updateGradient(gradient: *Param, scale: f32, update: *Param) void {
+            Net.updateGradient(gradient, scale, update);
         }
 
         fn run(input: *Input, param: *Param, output: *Output) void {
@@ -289,11 +308,6 @@ pub fn main() !void {
 
     var rng = std.rand.Pcg.init(0);
 
-    var params = zeroed(Net.Param);
-    Net.initializeParams(&params, &rng.random);
-
-    std.debug.warn("param :: {}\n", .{params[0]});
-
     var training = [_]TrainingExample([1]f32, f32){
         .{ .input = [1]f32{0}, .target = 0 },
         .{ .input = [1]f32{1}, .target = 2 },
@@ -302,15 +316,22 @@ pub fn main() !void {
         .{ .input = [1]f32{-2}, .target = -4 },
     };
 
-    var output: f32 = 0;
     var runtime_zero: usize = 0;
     var training_slice: []TrainingExample([1]f32, f32) = training[runtime_zero..training.len];
-    Net.run(&training_slice, &params, &output);
-    try stdout.print("loss :: {d:3.2}\n", .{output});
 
-    var gradient = zeroed(Net.Param);
-    var backpropDiscard = zeroed(Net.Input);
-    Net.reverse(&training_slice, &params, &output, &backpropDiscard, &gradient);
+    var params = zeroed(Net.Param);
+    Net.initializeParams(&params, &rng.random);
 
-    try stdout.print("gradient :: weight : {d:3.2} ; bias : {d:3.2}\n", .{ gradient[0].weights[0], gradient[0].bias });
+    var iter = RangeTo(10000).new();
+    while (iter.next()) |i| {
+        var output: f32 = 0;
+        Net.run(&training_slice, &params, &output);
+        try stdout.print("loss :: {d:3.2}\n", .{output});
+
+        var gradient = zeroed(Net.Param);
+        var backpropDiscard = zeroed(Net.Input);
+        Net.reverse(&training_slice, &params, &output, &backpropDiscard, &gradient);
+
+        Net.updateGradient(&params, -0.001, &gradient);
+    }
 }
