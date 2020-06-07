@@ -30,20 +30,20 @@ const Relu1 = struct {
         // nothing
     }
 
-    fn run(input: *Input, param: *Param, output: *Output) void {
-        if (input.* > 0) {
-            output.* = input.*;
+    fn run(input: *Input, param: Param, output: *Output) void {
+        if (input > 0) {
+            output.* = input;
         }
     }
     fn reverse(
-        input: *Input,
-        param: *Param,
-        delta: *Output,
+        input: Input,
+        param: Param,
+        delta: Output,
         backprop: *Input,
         gradient: *Param,
     ) void {
-        if (input.* > 0) {
-            backprop.* = delta.*;
+        if (input > 0) {
+            backprop.* = delta;
         }
     }
 };
@@ -69,23 +69,23 @@ fn Lin(size: usize) type {
             gradient.bias += scale * update.bias;
         }
 
-        fn run(input: *Input, param: *Param, output: *Output) void {
-            for (input.*) |x, i| {
+        fn run(input: Input, param: Param, output: *Output) void {
+            for (input) |x, i| {
                 output.* += x * param.weights[i];
             }
             output.* += param.bias;
         }
         fn reverse(
-            input: *Input,
-            param: *Param,
-            delta: *Output,
+            input: Input,
+            param: Param,
+            delta: Output,
             backprop: *Input, // add
             gradient: *Param, // add
         ) void {
-            gradient.bias = delta.*;
-            for (input.*) |x, i| {
-                backprop.*[i] += delta.* * param.weights[i];
-                gradient.weights[i] += delta.* * x;
+            gradient.bias = delta;
+            for (input) |x, i| {
+                backprop.*[i] += delta * param.weights[i];
+                gradient.weights[i] += delta * x;
             }
         }
     };
@@ -117,23 +117,23 @@ fn Seq2(comptime Net1: type, comptime Net2: type) type {
             Net2.updateGradient(&gradient.second, scale, &update.second);
         }
 
-        fn run(input: *Input, param: *Param, output: *Output) void {
+        fn run(input: Input, param: Param, output: *Output) void {
             var scratch: Net1.Output = zeroed(Net1.Output);
             Net1.run(input, &param.first, &scratch);
-            Net2.run(&scratch, &param.second, output);
+            Net2.run(scratch, &param.second, output);
         }
         fn reverse(
-            input: *Input,
-            param: *Param,
-            delta: *Output,
+            input: Input,
+            param: Param,
+            delta: Output,
             backprop: *Input, // add
             gradient: *Param, // add
         ) void {
             var scratch: Net1.Output = zeroed(Net1.Output);
             Net1.run(input, &param.first, &scratch);
             var middleDelta: Net1.Output = zeroed(Net1.Output);
-            Net2.reverse(&scratch, &param.second, delta, &middleDelta, &gradient.second);
-            Net1.reverse(input, &param.first, &middleDelta, backprop, &gradient.first);
+            Net2.reverse(scratch, &param.second, delta, &middleDelta, &gradient.second);
+            Net1.reverse(input, &param.first, middleDelta, backprop, &gradient.first);
         }
     };
 }
@@ -169,22 +169,22 @@ fn Fan(comptime by: usize, Net: type) type {
             }
         }
 
-        fn run(input: *Input, param: *Param, output: *Output) void {
+        fn run(input: Input, param: Param, output: *Output) void {
             var iter = RangeTo(by).new();
             while (iter.next()) |i| {
-                Net.run(input, &param[i], &output[i]);
+                Net.run(input, param[i], &output[i]);
             }
         }
         fn reverse(
-            input: *Input,
-            param: *Param,
-            delta: *Output,
+            input: Input,
+            param: Param,
+            delta: Output,
             backprop: *Input, // add
             gradient: *Param, // add
         ) void {
             var iter = RangeTo(by).new();
             while (iter.next()) |i| {
-                Net.reverse(input, &param[i], &delta[i], backprop, &gradient[i]);
+                Net.reverse(input, param[i], delta[i], backprop, &gradient[i]);
             }
         }
     };
@@ -208,29 +208,29 @@ fn LossSum(comptime LossNet: type) type {
             LossNet.updateGradient(gradient, scale, update);
         }
 
-        fn run(input: *Input, param: *Param, output: *Output) void {
+        fn run(input: Input, param: Param, output: *Output) void {
             var loss: f32 = 0.0;
 
-            for (input.*) |item, index| {
+            for (input) |item, index| {
                 var lossAdd: f32 = 0.0;
-                LossNet.run(&input.*[index], param, &lossAdd);
+                LossNet.run(input[index], param, &lossAdd);
                 loss += lossAdd;
             }
 
             output.* += loss;
         }
         fn reverse(
-            input: *Input,
-            param: *Param,
-            delta: *Output,
+            input: Input,
+            param: Param,
+            delta: Output,
             backprop: *Input, // add
             gradient: *Param, // add
         ) void {
             // TODO: backprop is not set; should we have non-differentiable inputs?
-            for (input.*) |_, index| {
+            for (input) |_, index| {
                 var discardInputDelta = zeroed(LossNet.Input);
                 // here we rely on gradients being added, instead of set:
-                LossNet.reverse(&input.*[index], param, delta, &discardInputDelta, gradient);
+                LossNet.reverse(input[index], param, delta, &discardInputDelta, gradient);
             }
         }
     };
@@ -256,16 +256,16 @@ fn LossL2(comptime Net: type) type {
             Net.updateGradient(gradient, scale, update);
         }
 
-        fn run(input: *Input, param: *Param, output: *Output) void {
+        fn run(input: Input, param: Param, output: *Output) void {
             var predicted = [1]f32{0};
-            Net.run(&input.input, param, &predicted);
+            Net.run(input.input, param, &predicted);
             var loss = (predicted[0] - input.target) * (predicted[0] - input.target);
             output.* += loss;
         }
         fn reverse(
-            input: *Input,
-            param: *Param,
-            delta: *Output,
+            input: Input,
+            param: Param,
+            delta: Output,
             backprop: *Input, // add
             gradient: *Param, // add
         ) void {
@@ -275,7 +275,7 @@ fn LossL2(comptime Net: type) type {
 
             // So we first need to run forward to obtain a prediction:
             var predicted = [1]f32{0};
-            Net.run(&input.input, param, &predicted);
+            Net.run(input.input, param, &predicted);
 
             // We have: L = (pred - target)^2
             // and we know dE / dL
@@ -287,12 +287,12 @@ fn LossL2(comptime Net: type) type {
 
             // so dE/dpred = dE/dL 2 (pred - target).
 
-            var adjustedDelta = 2 * delta.* * (predicted[0] - input.target);
+            var adjustedDelta: Net.Output = [1]f32{2 * delta * (predicted[0] - input.target)};
             var discardInputBackprop = zeroed(Net.Input);
             Net.reverse(
-                &input.input,
+                input.input,
                 param,
-                &adjustedDelta,
+                adjustedDelta,
                 &discardInputBackprop,
                 gradient,
             );
@@ -316,21 +316,18 @@ pub fn main() !void {
         .{ .input = [1]f32{-2}, .target = -4 },
     };
 
-    var runtime_zero: usize = 0;
-    var training_slice: []TrainingExample([1]f32, f32) = training[runtime_zero..training.len];
-
     var params = zeroed(Net.Param);
     Net.initializeParams(&params, &rng.random);
 
     var iter = RangeTo(10000).new();
     while (iter.next()) |i| {
         var output: f32 = 0;
-        Net.run(&training_slice, &params, &output);
+        Net.run(&training, params, &output);
         try stdout.print("loss :: {d:3.2}\n", .{output});
 
         var gradient = zeroed(Net.Param);
         var backpropDiscard = zeroed(Net.Input);
-        Net.reverse(&training_slice, &params, &output, &backpropDiscard, &gradient);
+        Net.reverse(&training, params, 1, &backpropDiscard, &gradient);
 
         Net.updateGradient(&params, -0.001, &gradient);
     }
