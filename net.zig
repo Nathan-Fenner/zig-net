@@ -1,13 +1,13 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-fn RangeTo(n: usize) type {
+pub fn RangeTo(n: usize) type {
     return struct {
         idx: usize,
-        fn new() RangeTo(n) {
+        pub fn new() RangeTo(n) {
             return .{ .idx = 0 };
         }
-        fn next(self: *RangeTo(n)) ?usize {
+        pub fn next(self: *RangeTo(n)) ?usize {
             if (self.idx >= n) {
                 return null;
             }
@@ -18,10 +18,10 @@ fn RangeTo(n: usize) type {
     };
 }
 
-const Relu1 = struct {
-    const Param = struct {};
-    const Input = f32;
-    const Output = f32;
+pub const Relu1 = struct {
+    pub const Param = struct {};
+    pub const Input = f32;
+    pub const Output = f32;
 
     fn initializeParams(param: *Param, rng: *std.rand.Random) void {
         // nothing
@@ -48,11 +48,11 @@ const Relu1 = struct {
     }
 };
 
-fn Lin(size: usize) type {
+pub fn Lin(size: usize) type {
     return struct {
-        const Param = struct { weights: [size]f32, bias: f32 };
-        const Input = [size]f32;
-        const Output = f32;
+        pub const Param = struct { weights: [size]f32, bias: f32 };
+        pub const Input = [size]f32;
+        pub const Output = f32;
 
         fn initializeParams(param: *Param, rng: *std.rand.Random) void {
             var iter = RangeTo(size).new();
@@ -91,7 +91,7 @@ fn Lin(size: usize) type {
     };
 }
 
-fn zeroed(comptime T: type) T {
+pub fn zeroed(comptime T: type) T {
     var x: T = undefined;
     @memset(@ptrCast([*]u8, &x), 0, @sizeOf(T));
     return x;
@@ -101,28 +101,28 @@ fn Seq2(comptime Net1: type, comptime Net2: type) type {
     assert(Net1.Output == Net2.Input);
 
     return struct {
-        const Param = struct {
+        pub const Param = struct {
             first: Net1.Param,
             second: Net2.Param,
         };
-        const Input = Net1.Input;
-        const Output = Net2.Output;
+        pub const Input = Net1.Input;
+        pub const Output = Net2.Output;
 
-        fn initializeParams(param: *Param, rng: *std.rand.Random) void {
+        pub fn initializeParams(param: *Param, rng: *std.rand.Random) void {
             Net1.initializeParams(&param.first, rng);
             Net2.initializeParams(&param.second, rng);
         }
-        fn updateGradient(gradient: *Param, scale: f32, update: *Param) void {
+        pub fn updateGradient(gradient: *Param, scale: f32, update: *Param) void {
             Net1.updateGradient(&gradient.first, scale, &update.first);
             Net2.updateGradient(&gradient.second, scale, &update.second);
         }
 
-        fn run(input: Input, param: Param, output: *Output) void {
+        pub fn run(input: Input, param: Param, output: *Output) void {
             var scratch: Net1.Output = zeroed(Net1.Output);
             Net1.run(input, &param.first, &scratch);
             Net2.run(scratch, &param.second, output);
         }
-        fn reverse(
+        pub fn reverse(
             input: Input,
             param: Param,
             delta: Output,
@@ -145,37 +145,37 @@ fn SeqFrom(comptime Nets: var, index: usize) type {
     return Seq2(Nets[index], SeqFrom(Nets, index + 1));
 }
 
-fn Seq(comptime Nets: var) type {
+pub fn Seq(comptime Nets: var) type {
     assert(Nets.len > 0);
     return SeqFrom(Nets, 0);
 }
 
-fn Fan(comptime by: usize, Net: type) type {
+pub fn Fan(comptime by: usize, Net: type) type {
     return struct {
-        const Input = Net.Input;
-        const Output = [by]Net.Output;
-        const Param = [by]Net.Param;
+        pub const Input = Net.Input;
+        pub const Output = [by]Net.Output;
+        pub const Param = [by]Net.Param;
 
-        fn initializeParams(param: *Param, rng: *std.rand.Random) void {
+        pub fn initializeParams(param: *Param, rng: *std.rand.Random) void {
             var iter = RangeTo(by).new();
             while (iter.next()) |i| {
                 Net.initializeParams(&param[i], rng);
             }
         }
-        fn updateGradient(gradient: *Param, scale: f32, update: *Param) void {
+        pub fn updateGradient(gradient: *Param, scale: f32, update: *Param) void {
             var iter = RangeTo(by).new();
             while (iter.next()) |i| {
                 Net.updateGradient(&gradient.*[i], scale, &update.*[i]);
             }
         }
 
-        fn run(input: Input, param: Param, output: *Output) void {
+        pub fn run(input: Input, param: Param, output: *Output) void {
             var iter = RangeTo(by).new();
             while (iter.next()) |i| {
                 Net.run(input, param[i], &output[i]);
             }
         }
-        fn reverse(
+        pub fn reverse(
             input: Input,
             param: Param,
             delta: Output,
@@ -190,25 +190,25 @@ fn Fan(comptime by: usize, Net: type) type {
     };
 }
 
-fn Relu(comptime in: usize, comptime out: usize) type {
+pub fn Relu(comptime in: usize, comptime out: usize) type {
     return Fan(out, Seq(.{ Lin(in), Relu1 }));
 }
 
-fn LossSum(comptime LossNet: type) type {
+pub fn LossSum(comptime LossNet: type) type {
     assert(LossNet.Output == f32);
     return struct {
-        const Input = []LossNet.Input;
-        const Output = f32;
-        const Param = LossNet.Param;
+        pub const Input = []LossNet.Input;
+        pub const Output = f32;
+        pub const Param = LossNet.Param;
 
-        fn initializeParams(param: *Param, rng: *std.rand.Random) void {
+        pub fn initializeParams(param: *Param, rng: *std.rand.Random) void {
             LossNet.initializeParams(param, rng);
         }
-        fn updateGradient(gradient: *Param, scale: f32, update: *Param) void {
+        pub fn updateGradient(gradient: *Param, scale: f32, update: *Param) void {
             LossNet.updateGradient(gradient, scale, update);
         }
 
-        fn run(input: Input, param: Param, output: *Output) void {
+        pub fn run(input: Input, param: Param, output: *Output) void {
             var loss: f32 = 0.0;
 
             for (input) |item, index| {
@@ -219,7 +219,7 @@ fn LossSum(comptime LossNet: type) type {
 
             output.* += loss;
         }
-        fn reverse(
+        pub fn reverse(
             input: Input,
             param: Param,
             delta: Output,
@@ -236,33 +236,33 @@ fn LossSum(comptime LossNet: type) type {
     };
 }
 
-fn TrainingExample(comptime T: type, comptime G: type) type {
+pub fn TrainingExample(comptime T: type, comptime G: type) type {
     return struct {
         input: T,
         target: G,
     };
 }
 
-fn LossL2(comptime Net: type) type {
+pub fn LossL2(comptime Net: type) type {
     return struct {
-        const Input = TrainingExample(Net.Input, f32);
-        const Output = f32;
-        const Param = Net.Param;
+        pub const Input = TrainingExample(Net.Input, f32);
+        pub const Output = f32;
+        pub const Param = Net.Param;
 
-        fn initializeParams(param: *Param, rng: *std.rand.Random) void {
+        pub fn initializeParams(param: *Param, rng: *std.rand.Random) void {
             Net.initializeParams(param, rng);
         }
-        fn updateGradient(gradient: *Param, scale: f32, update: *Param) void {
+        pub fn updateGradient(gradient: *Param, scale: f32, update: *Param) void {
             Net.updateGradient(gradient, scale, update);
         }
 
-        fn run(input: Input, param: Param, output: *Output) void {
+        pub fn run(input: Input, param: Param, output: *Output) void {
             var predicted = [1]f32{0};
             Net.run(input.input, param, &predicted);
             var loss = (predicted[0] - input.target) * (predicted[0] - input.target);
             output.* += loss;
         }
-        fn reverse(
+        pub fn reverse(
             input: Input,
             param: Param,
             delta: Output,
@@ -298,37 +298,4 @@ fn LossL2(comptime Net: type) type {
             );
         }
     };
-}
-
-pub fn main() !void {
-    const stdout = std.io.getStdOut().outStream();
-
-    const NetPredict = Fan(1, Lin(1)); // Fan of 1 converts to [1]f32
-    const Net = LossSum(LossL2(NetPredict));
-
-    var rng = std.rand.Pcg.init(0);
-
-    var training = [_]TrainingExample([1]f32, f32){
-        .{ .input = [1]f32{0}, .target = 0 },
-        .{ .input = [1]f32{1}, .target = 2 },
-        .{ .input = [1]f32{2}, .target = 4 },
-        .{ .input = [1]f32{-1}, .target = -2 },
-        .{ .input = [1]f32{-2}, .target = -4 },
-    };
-
-    var params = zeroed(Net.Param);
-    Net.initializeParams(&params, &rng.random);
-
-    var iter = RangeTo(1000).new();
-    while (iter.next()) |i| {
-        var output: f32 = 0;
-        Net.run(&training, params, &output);
-        try stdout.print("loss :: {d:3.2}\n", .{output});
-
-        var gradient = zeroed(Net.Param);
-        var backpropDiscard = zeroed(Net.Input);
-        Net.reverse(&training, params, 1, &backpropDiscard, &gradient);
-
-        Net.updateGradient(&params, -0.01, &gradient);
-    }
 }
